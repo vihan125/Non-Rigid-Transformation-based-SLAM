@@ -1,7 +1,6 @@
 #include <iostream>
 #include "ros/ros.h"
 #include <cv_bridge/cv_bridge.h>
-#include <vector>
 
 //PCL
 #include <pcl/conversions.h>
@@ -9,21 +8,17 @@
 #include <pcl/io/pcd_io.h>
 #include <pcl/common/distances.h>
 
-
 #include <pcl/io/pcd_io.h>
-#include <pcl/features/fpfh.h>
+#include <pcl/features/shot.h>
 #include <pcl/filters/filter.h>
 #include <pcl/features/normal_3d.h>
 #include <pcl/visualization/pcl_visualizer.h>
 #include "pcl_ros/point_cloud.h"
 #include "pcl_conversions/pcl_conversions.h"
 
-#include <pcl/registration/correspondence_estimation.h>
+#include <pcl/registration/icp.h>
 #include <pcl/registration/correspondence_rejection_sample_consensus.h>
 #include <pcl/registration/correspondence_rejection_median_distance.h>
-#include <pcl/registration/icp.h>
-#include <pcl/registration/transformation_estimation_svd.h>
-#include <pcl/registration/transformation_estimation_point_to_plane_weighted.h>
 
 //msgs
 #include "geometry_msgs/Point.h"
@@ -40,28 +35,26 @@
 #include <opencv2/features2d/features2d.hpp>
 #include <opencv2/features2d.hpp>
 #include <opencv2/highgui/highgui.hpp>
-#include <opencv2/opencv.hpp>
 
-class FPFHFeatures
+class SHOTFeatures
 {
     public:
-		pcl::PointCloud<pcl::FPFHSignature33>::Ptr previous_fpfh_features;
+
+		pcl::PointCloud<pcl::SHOT352>::Ptr previous_shot_features;
 		pcl::PointCloud<pcl::PointXYZ>::Ptr previous_keypoint_cloud ;
-		pcl::PointCloud<pcl::PointXYZ>::Ptr previous_cloud;
 		pcl::PointCloud<pcl::PointXYZ>::Ptr result;
 		pcl::PointCloud<pcl::PointXYZRGB>::Ptr result_rgb;
 		Eigen::Matrix4f globaltransform; 
 
-        FPFHFeatures()
+        SHOTFeatures()
         {
             //Assign subscriber
-            this->subscriber = this->nh.subscribe<sensor_msgs::PointCloud2>("/camera/depth/points",5,&FPFHFeatures::processPointCloud,this);
-			this->publisher = this->nh.advertise<pcl::PointCloud<pcl::PointXYZRGB>> ("/map", 1);
+            this->subscriber = this->nh.subscribe<sensor_msgs::PointCloud2>("/camera/depth/points",5,&SHOTFeatures::processPointCloud,this);
+            this->publisher = this->nh.advertise<pcl::PointCloud<pcl::PointXYZRGB>> ("/map", 1);
 
 			// global clouds
-			previous_fpfh_features = pcl::PointCloud<pcl::FPFHSignature33>::Ptr (new pcl::PointCloud<pcl::FPFHSignature33>);
+			previous_shot_features = pcl::PointCloud<pcl::SHOT352>::Ptr (new pcl::PointCloud<pcl::SHOT352>);
 			previous_keypoint_cloud = pcl::PointCloud<pcl::PointXYZ>::Ptr (new pcl::PointCloud<pcl::PointXYZ>);
-			previous_cloud = pcl::PointCloud<pcl::PointXYZ>::Ptr (new pcl::PointCloud<pcl::PointXYZ>);
 			result = pcl::PointCloud<pcl::PointXYZ>::Ptr (new pcl::PointCloud<pcl::PointXYZ>);
 			result_rgb = pcl::PointCloud<pcl::PointXYZRGB>::Ptr (new pcl::PointCloud<pcl::PointXYZRGB>);
 			globaltransform = Eigen::Matrix4f::Identity();
@@ -69,7 +62,6 @@ class FPFHFeatures
         }
 
         void processPointCloud(const sensor_msgs::PointCloud2ConstPtr& cloud_msg){
-			
 		double start = std::clock(); 
 		//Image
 		sensor_msgs::Image image_;
@@ -117,6 +109,7 @@ class FPFHFeatures
 		}
 
 		std::cout<<"Keypoint cloud size: "<< keypoint_cloud->points.size()<<std::endl;
+
 		//Remove Nan points from cloud
 		cloud->is_dense = false;
 		std::vector<int> indices;
@@ -131,59 +124,83 @@ class FPFHFeatures
 		cloud_with_normals->is_dense = false;
 		
   		normal_estimation.setInputCloud (cloud);
-  		normal_estimation.setSearchMethod (tree);		
-		normal_estimation.setKSearch(3);
+  		normal_estimation.setSearchMethod (tree);	
+		normal_estimation.setRadiusSearch(0.03);
 		normal_estimation.compute (*cloud_with_normals);
 
-		std::cout << "Calculation of Normals done" <<cloud_with_normals->points.size()<<std::endl;
+		pcl::PointCloud<pcl::Normal>::Ptr normals_Nan (new pcl::PointCloud<pcl::Normal>);
+		normals_Nan->is_dense = false;
+		normals_Nan->resize(cloud_with_normals->size());
+		int count =0 ;
+		for(int i =0 ; i<cloud_with_normals->points.size () ; i++){
+
+			if(isnan(cloud_with_normals->points[i].normal_x)){
+				continue;
+			}else{
+				normals_Nan->at(i)=cloud_with_normals->at(i);
+			}	
+		}
+		
+		std::cout << "Calculation of Normals done" <<normals_Nan->points.size()<<std::endl;
 
 		keypoint_cloud->is_dense = false;
         std::vector<int> indices2;
         pcl::removeNaNFromPointCloud(*keypoint_cloud,*keypoint_cloud, indices2);
 		std::cout<<"Remove nan points from keypoints: "<< keypoint_cloud->points.size()<<std::endl;   
 
-		pcl::FPFHEstimation<pcl::PointXYZ, pcl::Normal, pcl::FPFHSignature33> fpfh_estimation;
+		pcl::SHOTEstimation<pcl::PointXYZ, pcl::Normal, pcl::SHOT352> shot_estimation;
 		// Provide the original point cloud (without normals)
-		fpfh_estimation.setInputCloud (keypoint_cloud);
+		shot_estimation.setInputCloud (keypoint_cloud);
 		// Provide the point cloud with normals with no nan
-		fpfh_estimation.setInputNormals (cloud_with_normals);
-		fpfh_estimation.setSearchSurface(cloud);
-		fpfh_estimation.setSearchMethod (tree);
+		shot_estimation.setInputNormals (normals_Nan);
+		shot_estimation.setSearchSurface(cloud);
+		shot_estimation.setSearchMethod (tree);
 
 		// Compute features
-		pcl::PointCloud<pcl::FPFHSignature33>::Ptr fpfh_features (new pcl::PointCloud<pcl::FPFHSignature33>);
-		std::cout << "Calculating FPFH features........" <<std::endl;
-		fpfh_estimation.setKSearch(5);
-		fpfh_estimation.compute (*fpfh_features);
+		pcl::PointCloud<pcl::SHOT352>::Ptr shot_features (new pcl::PointCloud<pcl::SHOT352>);
+		std::cout << "Calculating SHOT features........" <<std::endl;
+		//shot_estimation.setKSearch(10);
+        shot_estimation.setRadiusSearch(0.02);
+		shot_estimation.compute (*shot_features);
 
-		std::cout << "Calculated Features size: " << fpfh_features->points.size () <<std::endl;
-
+		// Display and retrieve the shape context descriptor vector for the 0th point.
+		std::cout << "Calculated Features size: " << shot_features->points.size () <<std::endl;
+		
+		//pcl::FPFHSignature33 descriptor = (*fpfh_features)[0];
+		//std::cout << descriptor << std::endl;
 		double end = std::clock();
 		double time_taken = double(end-start) / double(CLOCKS_PER_SEC);
 		std::cout << "Time taken :" << time_taken <<std::endl;
 
-		pcl::visualization::PCLVisualizer viewer;
+		// pcl::visualization::PCLVisualizer viewer("PCL Viewer");
 
-		if(previous_fpfh_features->size()> 0 && previous_keypoint_cloud->size()>0){
 
+		std::cout << previous_shot_features->size() << std::endl;
+
+		if(previous_shot_features->size()> 0 && previous_keypoint_cloud->size()>0){
 			std::cout << "hola" << std::endl;
 
-			// correspondence rejection pipeline
+            // correspondence rejection pipeline
+			double start_r = std::clock();
 
 			// 1. correspondence estimation using equalent features
 			pcl::CorrespondencesPtr correspondences (new pcl::Correspondences());
 			pcl::Correspondence c;
 
-			for(int i = 0; i<fpfh_features->size(); i++){
+			for(int i = 0; i<shot_features->size(); i++){
 
-				for(int j = 0; j < previous_fpfh_features->size(); j++){
+				for(int j = 0; j < previous_shot_features->size(); j++){
+                    if(isnan(shot_features->at(i).descriptor[0]) || isnan(previous_shot_features->at(j).descriptor[0])){
+                        continue;
+                    }else{
+                        if(*shot_features->at(i).descriptor == *previous_shot_features->at(j).descriptor){
 
-					if(*fpfh_features->at(i).histogram == *previous_fpfh_features->at(j).histogram){
-						c.index_query = i;
-						c.index_match = j;
-						c.distance = pcl::squaredEuclideanDistance(keypoint_cloud->at(i),previous_keypoint_cloud->at(j));
-						correspondences->push_back(c);
-					}
+                            c.index_query = i;
+                            c.index_match = j;
+                            c.distance = pcl::squaredEuclideanDistance(keypoint_cloud->at(i),previous_keypoint_cloud->at(j));
+                            correspondences->push_back(c);
+                        }
+                    }
 				}
 			}
 			std::cout << "After feature matching :" << correspondences->size()<<std::endl;
@@ -192,48 +209,54 @@ class FPFHFeatures
 			pcl::CorrespondencesPtr correspondences_distance (new pcl::Correspondences());
 			pcl::registration::CorrespondenceRejectorMedianDistance distanceRejector;
 			distanceRejector.setInputCorrespondences(correspondences);
-			distanceRejector.setMedianFactor(0.25);
+			distanceRejector.setMedianFactor(0.1);
 			distanceRejector.getCorrespondences(*correspondences_distance);
 			std::cout << "After distant filtering :" << correspondences_distance->size()<<std::endl;
 
 			// 3. Correspondance rejection RANSAC
-			Eigen::Matrix4f transform = Eigen::Matrix4f::Identity();
-			// Eigen::Matrix4f keypoint_transform = Eigen::Matrix4f::Identity();
+			Eigen::Matrix4f initTransform = Eigen::Matrix4f::Identity();
 			pcl::registration::CorrespondenceRejectorSampleConsensus<pcl::PointXYZ> rejector_sac;
 			pcl::CorrespondencesPtr correspondences_filtered(new pcl::Correspondences());
 			rejector_sac.setInputSource(keypoint_cloud);
 			rejector_sac.setInputTarget(previous_keypoint_cloud);
-			rejector_sac.setInlierThreshold(0.2); // distance in m, not the squared distance
+			rejector_sac.setInlierThreshold(0.05); // distance in m, not the squared distance
 			rejector_sac.setMaximumIterations(1000000);
 			rejector_sac.setRefineModel(false);
 			rejector_sac.setInputCorrespondences(correspondences_distance);
 			rejector_sac.getCorrespondences(*correspondences_filtered);
 
-			std::cout << "Final correspondences :" << correspondences_filtered->size()<<std::endl;
+            std::cout << "Final correspondences :" << correspondences_filtered->size()<<std::endl;
 
-			for(int j = 0; j < correspondences_filtered->size(); j++){
-				std::cout<<correspondences_filtered->at(j)<<std::endl; 
-			};
+			// for(int j = 0; j < correspondences_filtered->size(); j++){
+			// 	std::cout<<correspondences_filtered->at(j)<<std::endl; 
+			// };
+            
+            pcl::PointCloud<pcl::PointXYZ>::Ptr initTransCloud (new pcl::PointCloud<pcl::PointXYZ>);
 
 			pcl::registration::TransformationEstimationSVD<pcl::PointXYZ,pcl::PointXYZ> trans_est;
-			// pcl::registration::TransformationEstimationPointToPlaneWeighted<pcl::PointXYZ,pcl::PointXYZ> trans_est;
-			trans_est.estimateRigidTransformation (*keypoint_cloud,*previous_keypoint_cloud, *correspondences_filtered, transform);
-			
-			//applying transformation to keypoint source cloud
-			// pcl::PointCloud<pcl::PointXYZ>::Ptr transformed_keypoint(new pcl::PointCloud<pcl::PointXYZ>);
-			// pcl::transformPointCloud(*keypoint_cloud, *transformed_keypoint,keypoint_transform);
-			
-			// Fine tunning transform using ICP (ICP perform better with slightly aligned point clouds -> no stuck in local minima)
-			// pcl::PointCloud<pcl::PointXYZ>::Ptr final_transformed_keypoint(new pcl::PointCloud<pcl::PointXYZ>);
-			// pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
-			// icp.setInputSource(transformed_keypoint);
-			// icp.setInputTarget(previous_keypoint_cloud);
-			// icp.align(*final_transformed_keypoint);
-			// transform = icp.getFinalTransformation();
+			trans_est.estimateRigidTransformation (*keypoint_cloud,*previous_keypoint_cloud, *correspondences_filtered, initTransform);
+            pcl::transformPointCloud(*keypoint_cloud, *initTransCloud, initTransform);
+
+			// 2. Fine alignment using ICP
+			Eigen::Matrix4f finalTransform = Eigen::Matrix4f::Identity();
+			pcl::IterativeClosestPoint<pcl::PointXYZ,pcl::PointXYZ> icp;
+			icp.setMaxCorrespondenceDistance(0.05);
+			icp.setRANSACOutlierRejectionThreshold(0.2);
+			icp.setTransformationEpsilon(0.01);
+			icp.setMaximumIterations(10000);
+			icp.setInputCloud(initTransCloud);
+			icp.setInputTarget(previous_keypoint_cloud);
+
+			pcl::PointCloud<pcl::PointXYZ>::Ptr finalCloud (new pcl::PointCloud<pcl::PointXYZ>);
+			icp.align(*finalCloud);
+			finalTransform = icp.getFinalTransformation() * initTransform;
+
+			double end_r = std::clock();
+			double time2_reg = double(end_r-start_r) / double(CLOCKS_PER_SEC);
+			std::cout << "done registration :" <<time2_reg<<" seconds"<<std::endl;
 
 			//global transform --
-			globaltransform = globaltransform * transform;
-
+			globaltransform = globaltransform * finalTransform;
 			std::cout << "Global Transform:" << std::endl<< globaltransform << std::endl;
 
 			pcl::PointCloud<pcl::PointXYZ>::Ptr transformed_source(new pcl::PointCloud<pcl::PointXYZ>);
@@ -242,26 +265,26 @@ class FPFHFeatures
 			pcl::transformPointCloud(*cloud, *transformed_source, globaltransform);
 			pcl::transformPointCloud(*cloud_RGB,*transformed_source_RGB,globaltransform);
 
-			viewer.setBackgroundColor(0, 0, 0);
-			pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> handler_source_cloud(transformed_source, 150, 80, 80);
-			pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> handler_source_keypoints(keypoint_cloud, 255, 0, 0);
+			// viewer.setBackgroundColor(0, 0, 0);
+			// pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> handler_source_cloud(transformed_source, 150, 80, 80);
+			// pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> handler_source_keypoints(keypoint_cloud, 255, 0, 0);
 
-			viewer.addPointCloud<pcl::PointXYZ>(transformed_source, handler_source_cloud, "source_cloud");
-			viewer.setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "source_cloud");
-			viewer.addPointCloud<pcl::PointXYZ>(keypoint_cloud, handler_source_keypoints, "source_keypoints");
-			viewer.setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 5, "source_keypoints");
-			pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> handler_target_cloud(result, 80, 150, 80);
-			pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> handler_target_keypoints(previous_keypoint_cloud, 0, 255, 0);
+			// viewer.addPointCloud<pcl::PointXYZ>(transformed_source, handler_source_cloud, "source_cloud");
+			// viewer.setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "source_cloud");
+			// viewer.addPointCloud<pcl::PointXYZ>(keypoint_cloud, handler_source_keypoints, "source_keypoints");
+			// viewer.setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 5, "source_keypoints");
+			// pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> handler_target_cloud(result, 80, 150, 80);
+			// pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> handler_target_keypoints(previous_keypoint_cloud, 0, 255, 0);
 
-			viewer.addPointCloud<pcl::PointXYZ>(result, handler_target_cloud, "target_cloud");
-			viewer.setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "target_cloud");
-			viewer.addPointCloud<pcl::PointXYZ>(previous_keypoint_cloud, handler_target_keypoints, "target_keypoints");
-			viewer.setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 5, "target_keypoints");
-			viewer.addCorrespondences<pcl::PointXYZ>(previous_keypoint_cloud,keypoint_cloud, *correspondences_filtered, "correspondences");
+			// viewer.addPointCloud<pcl::PointXYZ>(result, handler_target_cloud, "target_cloud");
+			// viewer.setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "target_cloud");
+			// viewer.addPointCloud<pcl::PointXYZ>(previous_keypoint_cloud, handler_target_keypoints, "target_keypoints");
+			// viewer.setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 5, "target_keypoints");
+			// viewer.addCorrespondences<pcl::PointXYZ>(previous_keypoint_cloud,keypoint_cloud, *correspondences_filtered, "correspondences");
 
-			previous_fpfh_features->clear();
+			previous_shot_features->clear();
 			previous_keypoint_cloud->clear();
-			pcl::copyPointCloud(*fpfh_features,*previous_fpfh_features);
+			pcl::copyPointCloud(*shot_features,*previous_shot_features);
 			pcl::copyPointCloud(*keypoint_cloud,*previous_keypoint_cloud);
 			result->operator+=(*transformed_source);
 			result_rgb->operator+=(*transformed_source_RGB);
@@ -269,19 +292,20 @@ class FPFHFeatures
 			std::cout<<"Concatanated point cloud size :"<<result->width<<"x"<<result->height<<std::endl;
 
 			publisher.publish(result_rgb);
+
+
 		}
 		else{
 			std::cout << "first_time" << std::endl;
-			pcl::copyPointCloud(*fpfh_features,*previous_fpfh_features);
+			pcl::copyPointCloud(*shot_features,*previous_shot_features);
 			pcl::copyPointCloud(*keypoint_cloud,*previous_keypoint_cloud);
 			pcl::copyPointCloud(*cloud,*result);
 			pcl::copyPointCloud(*cloud_RGB,*result_rgb);
 		}
-
-		while(!viewer.wasStopped())
-		{
-			viewer.spinOnce();
-		}
+		// while(!viewer.wasStopped())
+		// {
+		// 	viewer.spinOnce();
+		// }
 
 		// while (!ICPView.wasStopped())
 		// {
@@ -289,15 +313,10 @@ class FPFHFeatures
 		// 	ICPView.spinOnce();
 		// }
 
-		// viewer.close();
-		// ICPView.close();
-
-		std::cout<<"***********************************************************"<<std::endl;
+		 std::cout<<"***********************************************************"<<std::endl;
 		
 
         }
-		
-	
 
 
     private: 
@@ -313,7 +332,7 @@ int main(int argc, char **argv)
     std::cout << "Process_PointCloud under observation" << std::endl;
 
     // handle ROS communication events
-    FPFHFeatures PC_obj;
+    SHOTFeatures PC_obj;
     //ros::spin();
     ros::Rate r(0.05);
     while (ros::ok())

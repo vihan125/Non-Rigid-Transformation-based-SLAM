@@ -21,11 +21,9 @@
 #include "pcl_ros/point_cloud.h"
 #include "pcl_conversions/pcl_conversions.h"
 
-#include <pcl/registration/correspondence_estimation.h>
-#include <pcl/registration/correspondence_rejection_one_to_one.h>
-#include <pcl/registration/correspondence_rejection_sample_consensus.h>
-#include <pcl/registration/transformation_estimation_svd.h>
 #include <pcl/registration/icp.h>
+#include <pcl/registration/correspondence_rejection_sample_consensus.h>
+#include <pcl/registration/correspondence_rejection_median_distance.h>
 
 //msgs
 #include "geometry_msgs/Point.h"
@@ -77,22 +75,23 @@ class NARFFeatures
 		//Image
 		sensor_msgs::Image image_;
 		
-		//Converting ROS point cloud to Image
+        //Converting ROS point cloud to Image
 		pcl::toROSMsg (*cloud_msg,image_);
 		//sensor_msgs::ImageConstPtr img_msg = &image_;
 		
-		cv::Mat img, keypoints_mat, sharp_mat, contrast_mat, combi_mat;
+		cv::Mat img,filtered_img,keypoints_mat, sharp_mat, contrast_mat, combi_mat;
 		cv_bridge::CvImagePtr cvPtr;
 		cvPtr = cv_bridge::toCvCopy(image_, sensor_msgs::image_encodings::BGR8);
 		cvPtr->image.copyTo(img);
 
+		cv::bilateralFilter(img,filtered_img,15,50,80,cv::BORDER_DEFAULT);
 		std::vector<cv::KeyPoint> keypoints;
-		cv::Ptr<cv::ORB> detector = cv::ORB::create(200);
-		detector->detect(img, keypoints);
+		cv::Ptr<cv::ORB> detector = cv::ORB::create(150);
+		detector->detect(filtered_img, keypoints);
 		cv::KeyPoint kk = keypoints[0];
 		std::cout << "Resulting key points are of size: " << keypoints.size() <<std::endl; 
 		//std::cout << "First Point: " << kk.pt <<std::endl;
-		cv::drawKeypoints(img, keypoints,keypoints_mat, cv::Scalar::all(-1), cv::DrawMatchesFlags::DEFAULT);
+		cv::drawKeypoints(filtered_img, keypoints,keypoints_mat, cv::Scalar::all(-1), cv::DrawMatchesFlags::DEFAULT);
 		cv::imshow("Keypoints", keypoints_mat);
 		cv::waitKey(2);
 
@@ -154,15 +153,13 @@ class NARFFeatures
 		// Focal length. The value seen here has been taken from the original depth images.
 		// It is safe to use the same value vertically and horizontally.
 		float focalLengthX = 525.0f, focalLengthY = focalLengthX;
+        
         // -----------------------------------------------
 		// -----Create RangeImage from the PointCloud-----
 		// -----------------------------------------------
 		float noise_level = 0.00;
 		float min_range = 0;
 		int border_size = 0;
-		// boost::shared_ptr<pcl::RangeImage> range_image_ptr (new pcl::RangeImage);
-		// pcl::RangeImage& range_image = *range_image_ptr;   
-		// range_image.createFromPointCloud (*cloud, angularResolution,maxAngleWidth,maxAngleHeight,scene_sensor_pose, coordinate_frame, noise_level, min_range, border_size);
 
 		pcl::RangeImagePlanar rangeImagePlanar;
 		rangeImagePlanar.createFromPointCloudWithFixedSize(*cloud, imageSizeX, imageSizeY,
@@ -172,17 +169,6 @@ class NARFFeatures
 		//range_image.integrateFarRanges (far_ranges);
 		std::cout << "Range image size :" << rangeImagePlanar.height <<" x "<< rangeImagePlanar.width <<std::endl;
 		rangeImagePlanar.setUnseenToMaxRange();
-
-		// pcl::visualization::PCLVisualizer viewer ("3D Viewer");
-		// viewer.setBackgroundColor (1, 1, 1);
-		// pcl::visualization::PointCloudColorHandlerCustom<pcl::PointWithRange> range_image_color_handler (range_image_ptr, 0, 0, 0);
-		// viewer.addPointCloud (range_image_ptr, range_image_color_handler, "range image");
-		// viewer.setPointCloudRenderingProperties (pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "range image");
-		// //viewer.addCoordinateSystem (1.0f);
-		// //PointCloudColorHandlerCustom<PointType> point_cloud_color_handler (point_cloud_ptr, 150, 150, 150);
-		// //viewer.addPointCloud (point_cloud_ptr, point_cloud_color_handler, "original point cloud");
-		// viewer.initCameraParameters ();
-		// setViewerPose (viewer, rangeImagePlanar.getTransformationToWorldSystem ());
 
 		//Show range image ///
 		pcl::visualization::RangeImageVisualizer range_image_widget ("Range image");
@@ -194,7 +180,6 @@ class NARFFeatures
         // -----Extract NARF descriptors for interest points-----
         // ------------------------------------------------------
         bool rotation_invariant = true;
-		std::cout << "Range image size :" << rangeImagePlanar.height <<" x "<< rangeImagePlanar.width <<std::endl;
         pcl::NarfDescriptor narf_descriptor (&rangeImagePlanar, &keypoint_indices2);
         narf_descriptor.getParameters ().support_size = support_size;
         narf_descriptor.getParameters ().rotation_invariant = rotation_invariant;
@@ -209,129 +194,129 @@ class NARFFeatures
 		// Visualization of keypoints along with the original cloud
 		pcl::visualization::PCLVisualizer viewer("PCL Viewer");
 
-		//pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> keypoints_color_handler (keypoint_cloud, 0, 255, 0);
-		// pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGB> cloud_color_handler (cloud_RGB, 255, 255, 0);
-		// viewer.setBackgroundColor( 0.0, 0.0, 0.0 );
-		// viewer.addPointCloud(cloud_RGB, "cloud");
-		// //viewer.addPointCloudNormals<pcl::PointXYZ, pcl::Normal>(cloud,cloud_with_normals, 25, 0.15,"normals"); 
-		//viewer.addPointCloud(keypoint_cloud, keypoints_color_handler, "keypoints");
-
-		// pcl::visualization::PCLVisualizer ICPView("ICP Viewer");
-
 
 		std::cout << previous_Narf_features->size() << std::endl;
 
 		if(previous_Narf_features->size()> 0 && previous_keypoint_cloud->size()>0){
 
 			std::cout << "hola" << std::endl;
+            // correspondence rejection pipeline
 
-			// correspondence rejection pipeline
-
-			// 1. correspondence estimation using equalent features and distance between two matching points (10 cm)
+			// 1. correspondence estimation using equalent features
 			pcl::CorrespondencesPtr correspondences (new pcl::Correspondences());
 			pcl::Correspondence c;
 
 			for(int i = 0; i<narf_descriptors->size(); i++){
 
 				for(int j = 0; j < previous_Narf_features->size(); j++){
-
+                    std::cout <<i<<","<<j<<std::endl;
 					if(*narf_descriptors->at(i).descriptor == *previous_Narf_features->at(j).descriptor){
+
 						c.index_query = i;
 						c.index_match = j;
-						c.distance = pcl::squaredEuclideanDistance(keypoint_cloud->at(i),previous_keypoint_cloud->at(j));
-						if(c.distance < 0.25){
-							correspondences->push_back(c);
-						}
+                        pcl::PointXYZ point1;
+                        point1.x = narf_descriptors->at(i).x;
+                        point1.y = narf_descriptors->at(i).y;
+                        point1.z = narf_descriptors->at(i).z;
+
+                        pcl::PointXYZ point2;
+                        point2.x = previous_Narf_features->at(i).x;
+                        point2.y = previous_Narf_features->at(i).y;
+                        point2.z = previous_Narf_features->at(i).z;
+
+						c.distance = pcl::squaredEuclideanDistance(point1,point2);
+						correspondences->push_back(c);
 					}
 				}
 			}
+			std::cout << "After feature matching :" << correspondences->size()<<std::endl;
 
-			// 2. Correspondance rejection RANSAC
+			// 2. Reject correspondances which have dostance greater than median distance
+			pcl::CorrespondencesPtr correspondences_distance (new pcl::Correspondences());
+			pcl::registration::CorrespondenceRejectorMedianDistance distanceRejector;
+			distanceRejector.setInputCorrespondences(correspondences);
+			distanceRejector.setMedianFactor(0.16);
+			distanceRejector.getCorrespondences(*correspondences_distance);
+			std::cout << "After distant filtering :" << correspondences_distance->size()<<std::endl;
 
-			Eigen::Matrix4f transform = Eigen::Matrix4f::Identity();
-			Eigen::Matrix4f keypoint_transform = Eigen::Matrix4f::Identity();
+			// 3. Correspondance rejection RANSAC
+			Eigen::Matrix4f initTransform = Eigen::Matrix4f::Identity();
 			pcl::registration::CorrespondenceRejectorSampleConsensus<pcl::PointXYZ> rejector_sac;
 			pcl::CorrespondencesPtr correspondences_filtered(new pcl::Correspondences());
 			rejector_sac.setInputSource(keypoint_cloud);
 			rejector_sac.setInputTarget(previous_keypoint_cloud);
-			rejector_sac.setInlierThreshold(2); // distance in m, not the squared distance
+			rejector_sac.setInlierThreshold(0.1); // distance in m, not the squared distance
 			rejector_sac.setMaximumIterations(1000000);
 			rejector_sac.setRefineModel(false);
-			rejector_sac.setInputCorrespondences(correspondences);
+			rejector_sac.setInputCorrespondences(correspondences_distance);
 			rejector_sac.getCorrespondences(*correspondences_filtered);
 
-			std::cout << "Final correspondences" << std::endl;
+            std::cout << "Final correspondences :" << correspondences_filtered->size()<<std::endl;
 
 			for(int j = 0; j < correspondences_filtered->size(); j++){
 				std::cout<<correspondences_filtered->at(j)<<std::endl; 
 			};
+            
+            pcl::PointCloud<pcl::PointXYZ>::Ptr initTransCloud (new pcl::PointCloud<pcl::PointXYZ>);
 
 			pcl::registration::TransformationEstimationSVD<pcl::PointXYZ,pcl::PointXYZ> trans_est;
-			trans_est.estimateRigidTransformation (*keypoint_cloud,*previous_keypoint_cloud, *correspondences_filtered, transform);
+			trans_est.estimateRigidTransformation (*keypoint_cloud,*previous_keypoint_cloud, *correspondences_filtered, initTransform);
+            pcl::transformPointCloud(*keypoint_cloud, *initTransCloud, initTransform);
 
 
+			// 2. Fine alignment using ICP
+			Eigen::Matrix4f finalTransform = Eigen::Matrix4f::Identity();
+			pcl::IterativeClosestPoint<pcl::PointXYZ,pcl::PointXYZ> icp;
+			icp.setMaxCorrespondenceDistance(0.05);
+			icp.setRANSACOutlierRejectionThreshold(0.2);
+			icp.setTransformationEpsilon(0.01);
+			icp.setMaximumIterations(10000);
+			icp.setInputCloud(initTransCloud);
+			icp.setInputTarget(previous_keypoint_cloud);
 
-			for(int j = 0; j < correspondences_filtered->size(); j++){
-				std::cout<<correspondences_filtered->at(j)<<std::endl; 
-			}
+			pcl::PointCloud<pcl::PointXYZ>::Ptr finalCloud (new pcl::PointCloud<pcl::PointXYZ>);
+			icp.align(*finalCloud);
+			finalTransform = icp.getFinalTransformation() * initTransform;
 
-		// 	// Transformation Estimation method 2
-		// 	//pcl::registration::TransformationEstimationSVD<pcl::PointXYZ, pcl::PointXYZ> transformation_estimation;
-		// 	//transformation_estimation.estimateRigidTransformation(*source_keypoints, *target_keypoints, *correspondences, transform);
-			std::cout << "Estimated Transform:" << std::endl<< transform << std::endl;
-
-			globaltransform = globaltransform * transform;
-
+			//global transform --
+			globaltransform = globaltransform * finalTransform;
 			std::cout << "Global Transform:" << std::endl<< globaltransform << std::endl;
-
-		// 	// / refinement transform source using transformation matrix ///////////////////////////////////////////////////////
 
 			pcl::PointCloud<pcl::PointXYZ>::Ptr transformed_source(new pcl::PointCloud<pcl::PointXYZ>);
 			pcl::PointCloud<pcl::PointXYZRGB>::Ptr transformed_source_RGB(new pcl::PointCloud<pcl::PointXYZRGB>);
-			pcl::PointCloud<pcl::PointXYZ>::Ptr final_output(new pcl::PointCloud<pcl::PointXYZ>);
+
 			pcl::transformPointCloud(*cloud, *transformed_source, globaltransform);
 			pcl::transformPointCloud(*cloud_RGB,*transformed_source_RGB,globaltransform);
 
 			viewer.setBackgroundColor(0, 0, 0);
 			pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> handler_source_cloud(transformed_source, 150, 80, 80);
-			pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> handler_source_keypoints(previous_keypoint_cloud, 255, 0, 0);
+			pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> handler_source_keypoints(keypoint_cloud, 255, 0, 0);
 
 			viewer.addPointCloud<pcl::PointXYZ>(transformed_source, handler_source_cloud, "source_cloud");
 			viewer.setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "source_cloud");
 			viewer.addPointCloud<pcl::PointXYZ>(keypoint_cloud, handler_source_keypoints, "source_keypoints");
-
+			viewer.setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 5, "source_keypoints");
 			pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> handler_target_cloud(result, 80, 150, 80);
-			pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> handler_target_keypoints(keypoint_cloud, 0, 255, 0);
+			pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> handler_target_keypoints(previous_keypoint_cloud, 0, 255, 0);
 
 			viewer.addPointCloud<pcl::PointXYZ>(result, handler_target_cloud, "target_cloud");
 			viewer.setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "target_cloud");
 			viewer.addPointCloud<pcl::PointXYZ>(previous_keypoint_cloud, handler_target_keypoints, "target_keypoints");
 			viewer.setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 5, "target_keypoints");
-			viewer.addCorrespondences<pcl::PointXYZ>(previous_keypoint_cloud, keypoint_cloud, *correspondences_filtered, "correspondences");
+			viewer.addCorrespondences<pcl::PointXYZ>(previous_keypoint_cloud,keypoint_cloud, *correspondences_filtered, "correspondences");
 
 			previous_Narf_features->clear();
 			previous_keypoint_cloud->clear();
 			pcl::copyPointCloud(*narf_descriptors,*previous_Narf_features);
 			pcl::copyPointCloud(*keypoint_cloud,*previous_keypoint_cloud);
-
 			result->operator+=(*transformed_source);
 			result_rgb->operator+=(*transformed_source_RGB);
 			std::cout<<"cloud size :"<<cloud->width<<"x"<<cloud->height<<std::endl;
 			std::cout<<"Concatanated point cloud size :"<<result->width<<"x"<<result->height<<std::endl;
-			// ICPView.setBackgroundColor(0, 0, 0);
-			//pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGB> rgb_cloud(result_rgb, 255, 255, 0);
-			// ICPView.addPointCloud<pcl::PointXYZRGB>(result_rgb, "result_cloud");
+
 			publisher.publish(result_rgb);
 
-		// 	pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
-		// 	icp.setInputSource(transformed_source);
-		// 	icp.setInputTarget(cloud);
-		// 	icp.align(*final_output);
-		// 	std::cout << "has converged:" << icp.hasConverged() << " score: " << icp.getFitnessScore() << std::endl;
-		// 	std::cout << icp.getFinalTransformation() << std::endl;
 
-		// 	ICPView.addPointCloud<pcl::PointXYZ>(final_output, handler_source_cloud, "Final_cloud");
-		// 	ICPView.setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 5, "source_keypoints");
 		}
 		else{
 			std::cout << "first_time" << std::endl;
@@ -384,7 +369,7 @@ int main(int argc, char **argv)
     // handle ROS communication events
     NARFFeatures PC_obj;
     //ros::spin();
-    ros::Rate r(0.01);
+    ros::Rate r(0.05);
     while (ros::ok())
     {
     	ros::spinOnce();

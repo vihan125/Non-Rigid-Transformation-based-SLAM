@@ -1,29 +1,26 @@
 #include <iostream>
 #include "ros/ros.h"
 #include <cv_bridge/cv_bridge.h>
-#include <vector>
 
 //PCL
 #include <pcl/conversions.h>
 #include <pcl/point_types.h>
 #include <pcl/io/pcd_io.h>
-#include <pcl/common/distances.h>
 
 
 #include <pcl/io/pcd_io.h>
+#include <pcl/filters/fast_bilateral.h>
 #include <pcl/features/fpfh.h>
-#include <pcl/filters/filter.h>
 #include <pcl/features/normal_3d.h>
 #include <pcl/visualization/pcl_visualizer.h>
 #include "pcl_ros/point_cloud.h"
 #include "pcl_conversions/pcl_conversions.h"
 
 #include <pcl/registration/correspondence_estimation.h>
-#include <pcl/registration/correspondence_rejection_sample_consensus.h>
-#include <pcl/registration/correspondence_rejection_median_distance.h>
-#include <pcl/registration/icp.h>
+#include <pcl/registration/correspondence_rejection_one_to_one.h>
+#include <pcl/registration/ia_ransac.h>
 #include <pcl/registration/transformation_estimation_svd.h>
-#include <pcl/registration/transformation_estimation_point_to_plane_weighted.h>
+#include <pcl/registration/icp.h>
 
 //msgs
 #include "geometry_msgs/Point.h"
@@ -40,7 +37,6 @@
 #include <opencv2/features2d/features2d.hpp>
 #include <opencv2/features2d.hpp>
 #include <opencv2/highgui/highgui.hpp>
-#include <opencv2/opencv.hpp>
 
 class FPFHFeatures
 {
@@ -59,6 +55,7 @@ class FPFHFeatures
 			this->publisher = this->nh.advertise<pcl::PointCloud<pcl::PointXYZRGB>> ("/map", 1);
 
 			// global clouds
+			// global clouds
 			previous_fpfh_features = pcl::PointCloud<pcl::FPFHSignature33>::Ptr (new pcl::PointCloud<pcl::FPFHSignature33>);
 			previous_keypoint_cloud = pcl::PointCloud<pcl::PointXYZ>::Ptr (new pcl::PointCloud<pcl::PointXYZ>);
 			previous_cloud = pcl::PointCloud<pcl::PointXYZ>::Ptr (new pcl::PointCloud<pcl::PointXYZ>);
@@ -69,7 +66,7 @@ class FPFHFeatures
         }
 
         void processPointCloud(const sensor_msgs::PointCloud2ConstPtr& cloud_msg){
-			
+
 		double start = std::clock(); 
 		//Image
 		sensor_msgs::Image image_;
@@ -168,72 +165,47 @@ class FPFHFeatures
 
 			std::cout << "hola" << std::endl;
 
-			// correspondence rejection pipeline
-
-			// 1. correspondence estimation using equalent features
-			pcl::CorrespondencesPtr correspondences (new pcl::Correspondences());
-			pcl::Correspondence c;
-
-			for(int i = 0; i<fpfh_features->size(); i++){
-
-				for(int j = 0; j < previous_fpfh_features->size(); j++){
-
-					if(*fpfh_features->at(i).histogram == *previous_fpfh_features->at(j).histogram){
-						c.index_query = i;
-						c.index_match = j;
-						c.distance = pcl::squaredEuclideanDistance(keypoint_cloud->at(i),previous_keypoint_cloud->at(j));
-						correspondences->push_back(c);
-					}
-				}
-			}
-			std::cout << "After feature matching :" << correspondences->size()<<std::endl;
-
-			// 2. Reject correspondances which have dostance greater than median distance
-			pcl::CorrespondencesPtr correspondences_distance (new pcl::Correspondences());
-			pcl::registration::CorrespondenceRejectorMedianDistance distanceRejector;
-			distanceRejector.setInputCorrespondences(correspondences);
-			distanceRejector.setMedianFactor(0.25);
-			distanceRejector.getCorrespondences(*correspondences_distance);
-			std::cout << "After distant filtering :" << correspondences_distance->size()<<std::endl;
-
-			// 3. Correspondance rejection RANSAC
-			Eigen::Matrix4f transform = Eigen::Matrix4f::Identity();
-			// Eigen::Matrix4f keypoint_transform = Eigen::Matrix4f::Identity();
-			pcl::registration::CorrespondenceRejectorSampleConsensus<pcl::PointXYZ> rejector_sac;
+			double start_r = std::clock();
+			// 1. initial alignment of point clouds
+			Eigen::Matrix4f initTransform = Eigen::Matrix4f::Identity();
+			pcl::SampleConsensusInitialAlignment<pcl::PointXYZ,pcl::PointXYZ,pcl::FPFHSignature33> initSAC;
 			pcl::CorrespondencesPtr correspondences_filtered(new pcl::Correspondences());
-			rejector_sac.setInputSource(keypoint_cloud);
-			rejector_sac.setInputTarget(previous_keypoint_cloud);
-			rejector_sac.setInlierThreshold(0.2); // distance in m, not the squared distance
-			rejector_sac.setMaximumIterations(1000000);
-			rejector_sac.setRefineModel(false);
-			rejector_sac.setInputCorrespondences(correspondences_distance);
-			rejector_sac.getCorrespondences(*correspondences_filtered);
+			initSAC.setMinSampleDistance(0.1);
+			initSAC.setMaxCorrespondenceDistance(0.5);
+			initSAC.setMaximumIterations(1000);
 
-			std::cout << "Final correspondences :" << correspondences_filtered->size()<<std::endl;
+			initSAC.setInputCloud(keypoint_cloud);
+			initSAC.setSourceFeatures(fpfh_features);
 
-			for(int j = 0; j < correspondences_filtered->size(); j++){
-				std::cout<<correspondences_filtered->at(j)<<std::endl; 
-			};
-
-			pcl::registration::TransformationEstimationSVD<pcl::PointXYZ,pcl::PointXYZ> trans_est;
-			// pcl::registration::TransformationEstimationPointToPlaneWeighted<pcl::PointXYZ,pcl::PointXYZ> trans_est;
-			trans_est.estimateRigidTransformation (*keypoint_cloud,*previous_keypoint_cloud, *correspondences_filtered, transform);
+			initSAC.setInputTarget(previous_keypoint_cloud);
+			initSAC.setTargetFeatures(previous_fpfh_features);
 			
-			//applying transformation to keypoint source cloud
-			// pcl::PointCloud<pcl::PointXYZ>::Ptr transformed_keypoint(new pcl::PointCloud<pcl::PointXYZ>);
-			// pcl::transformPointCloud(*keypoint_cloud, *transformed_keypoint,keypoint_transform);
+			pcl::PointCloud<pcl::PointXYZ>::Ptr initTransCloud (new pcl::PointCloud<pcl::PointXYZ>);
+			initSAC.align(*initTransCloud);
+			initTransform = initSAC.getFinalTransformation();
 			
-			// Fine tunning transform using ICP (ICP perform better with slightly aligned point clouds -> no stuck in local minima)
-			// pcl::PointCloud<pcl::PointXYZ>::Ptr final_transformed_keypoint(new pcl::PointCloud<pcl::PointXYZ>);
-			// pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
-			// icp.setInputSource(transformed_keypoint);
-			// icp.setInputTarget(previous_keypoint_cloud);
-			// icp.align(*final_transformed_keypoint);
-			// transform = icp.getFinalTransformation();
+			double end_r = std::clock();
+			double time_r = double(end_r-start_r) / double(CLOCKS_PER_SEC);
+			std::cout << "done init :" <<time_r<<" seconds"<<std::endl;
+			// 2. Fine alignment using ICP
+			Eigen::Matrix4f finalTransform = Eigen::Matrix4f::Identity();
+			pcl::IterativeClosestPoint<pcl::PointXYZ,pcl::PointXYZ> icp;
+			icp.setMaxCorrespondenceDistance(0.1);
+			icp.setRANSACOutlierRejectionThreshold(0.2);
+			icp.setTransformationEpsilon(0.01);
+			icp.setMaximumIterations(10000);
+			icp.setInputCloud(initTransCloud);
+			icp.setInputTarget(previous_keypoint_cloud);
 
+			pcl::PointCloud<pcl::PointXYZ>::Ptr finalCloud (new pcl::PointCloud<pcl::PointXYZ>);
+			icp.align(*finalCloud);
+			finalTransform = icp.getFinalTransformation() * initTransform;
+			
+			double end2_r = std::clock();
+			double time2_r = double(end2_r-end_r) / double(CLOCKS_PER_SEC);
+			std::cout << "done init :" <<time2_r<<" seconds"<<std::endl;
 			//global transform --
-			globaltransform = globaltransform * transform;
-
+			globaltransform = globaltransform * finalTransform;
 			std::cout << "Global Transform:" << std::endl<< globaltransform << std::endl;
 
 			pcl::PointCloud<pcl::PointXYZ>::Ptr transformed_source(new pcl::PointCloud<pcl::PointXYZ>);

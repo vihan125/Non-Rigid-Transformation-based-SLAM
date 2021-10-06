@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0.2)
-project(cloud_features)
+project(registration)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)
@@ -79,7 +79,7 @@ endif()
 ## Generate added messages and services with any dependencies listed here
 # generate_messages(
 #   DEPENDENCIES
-#   geometry_msgs#   sensor_msgs
+#   std_msgs  # Or other packages containing msgs
 # )
 
 ################################################
@@ -113,8 +113,8 @@ endif()
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
 #  INCLUDE_DIRS include
-#  LIBRARIES cloud_features
-#  CATKIN_DEPENDS cv_bridge geometry_msgs message_generation pcl_conversions pcl_ros roscpp sensor_msgs
+#  LIBRARIES registration
+#  CATKIN_DEPENDS other_catkin_pkg
 #  DEPENDS system_lib
 )
 
@@ -126,13 +126,13 @@ catkin_package(
 ## Your package locations should be listed before other locations
 include_directories(
 # include
-  ${catkin_INCLUDE_DIRS}
-  ${OpenCV_INCLUDE_DIRS}
+    ${catkin_INCLUDE_DIRS}
+    ${OpenCV_INCLUDE_DIRS}
 )
 
 ## Declare a C++ library
 # add_library(${PROJECT_NAME}
-#   src/${PROJECT_NAME}/cloud_features.cpp
+#   src/${PROJECT_NAME}/registration.cpp
 # )
 
 ## Add cmake target dependencies of the library
@@ -143,14 +143,12 @@ include_directories(
 ## Declare a C++ executable
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
-add_executable(FPFH_F src/fpfh.cpp)
-add_executable(NARF_F src/narf.cpp)
-add_executable(SHOT_F src/shot.cpp)
-add_executable(3DSC_F src/3dsc.cpp)
-add_executable(USC_F src/usc.cpp)
-add_executable(RIFT_F src/rift.cpp)
-
-add_executable(ICP src/icp.cpp)
+# add_executable(${PROJECT_NAME}_node src/registration_node.cpp)
+add_executable(REG_FPFH src/reg_fpfh.cpp)
+add_executable(REG_NARF src/reg_narf.cpp)
+add_executable(REG_SHOT src/reg_shot.cpp)
+add_executable(REG_3DSC src/reg_3dc.cpp)
+add_executable(REG_USC src/reg_usc.cpp)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -167,55 +165,40 @@ add_executable(ICP src/icp.cpp)
 #   ${catkin_LIBRARIES}
 # )
 
-target_link_libraries(FPFH_F
+target_link_libraries(REG_FPFH
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES}
   pcl_visualization
   pcl_registration
 )
 
-target_link_libraries(NARF_F
+target_link_libraries(REG_NARF
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES}
   pcl_visualization
   pcl_registration
 )
 
-target_link_libraries(SHOT_F
+target_link_libraries(REG_SHOT
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES}
   pcl_visualization
   pcl_registration
 )
 
-target_link_libraries(3DSC_F
+target_link_libraries(REG_3DSC
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES}
   pcl_visualization
   pcl_registration
 )
 
-target_link_libraries(USC_F
+target_link_libraries(REG_USC
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES}
   pcl_visualization
   pcl_registration
 )
-
-target_link_libraries(RIFT_F
-  ${catkin_LIBRARIES}
-  ${OpenCV_LIBRARIES}
-  pcl_visualization
-  pcl_registration
-)
-
-target_link_libraries(ICP
-  ${catkin_LIBRARIES}
-  ${OpenCV_LIBRARIES}
-  pcl_visualization
-  pcl_registration
-)
-
 
 #############
 ## Install ##
@@ -264,7 +247,7 @@ target_link_libraries(ICP
 #############
 
 ## Add gtest based cpp test target and link libraries
-# catkin_add_gtest(${PROJECT_NAME}-test test/test_cloud_features.cpp)
+# catkin_add_gtest(${PROJECT_NAME}-test test/test_registration.cpp)
 # if(TARGET ${PROJECT_NAME}-test)
 #   target_link_libraries(${PROJECT_NAME}-test ${PROJECT_NAME})
 # endif()

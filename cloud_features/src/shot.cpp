@@ -6,7 +6,7 @@
 #include <pcl/conversions.h>
 #include <pcl/point_types.h>
 #include <pcl/io/pcd_io.h>
-
+#include <pcl/common/distances.h>
 
 #include <pcl/io/pcd_io.h>
 #include <pcl/features/shot.h>
@@ -79,7 +79,7 @@ class SHOTFeatures
 		cvPtr->image.copyTo(img);
 
 		std::vector<cv::KeyPoint> keypoints;
-		cv::Ptr<cv::ORB> detector = cv::ORB::create(200);
+		cv::Ptr<cv::ORB> detector = cv::ORB::create(100);
 		detector->detect(img, keypoints);
 		cv::KeyPoint kk = keypoints[0];
 		std::cout << "Resulting key points are of size: " << keypoints.size() <<std::endl; 
@@ -189,6 +189,68 @@ class SHOTFeatures
 
 		if(previous_shot_features->size()> 0 && previous_keypoint_cloud->size()>0){
 			std::cout << "hola" << std::endl;
+
+			std::vector<std::pair<int,std::vector<int>>> matches;
+			std::vector<int> indexes;
+			for(int i = 0; i<shot_features->size(); i++){
+
+				for(int j = 0; j < previous_shot_features->size(); j++){
+					if(*shot_features->at(i).descriptor == *previous_shot_features->at(j).descriptor){
+						indexes.push_back(j);
+					}
+				}
+				if(indexes.size()>0){
+					matches.push_back(std::make_pair(i,indexes));
+					indexes.clear();
+				}
+			}
+
+
+			pcl::PointXYZ point1;
+			pcl::PointXYZ point2;
+			float d;
+			float d_previous;
+			bool first = true;
+			int matching_index;
+			int current_point;
+			std::vector<std::pair<int,int>> closest_match;
+			pcl::CorrespondencesPtr correspondences_results (new pcl::Correspondences());
+			pcl::Correspondence c;
+
+			for(int i = 0; i < matches.size(); i++){
+				point1 = keypoint_cloud->at(matches.at(i).first); 
+				
+				for(int j =0; j<matches.at(i).second.size() ; j++){
+					current_point = matches.at(i).second.at(j);
+					point2 = previous_keypoint_cloud->at(current_point);
+					d = pcl::squaredEuclideanDistance(point1,point2);
+
+					if(first){
+						d_previous = d;
+						matching_index = current_point;
+						first = false;
+					}else{
+						if(d_previous > d){
+							// std::cout<<"inside"<<std::endl;
+							// std::cout <<matches.at(i).first<<","<<current_point<<std::endl;
+							// std::cout <<point1<<","<<point2<<":"<<d<<std::endl;
+							d_previous = d;
+							matching_index = current_point;
+						}
+					}
+				}
+				c.index_match = matching_index;
+				c.index_query = matches.at(i).first;
+				c.distance = d_previous;
+				correspondences_results->push_back(c);
+				closest_match.push_back(std::make_pair(matches.at(i).first,matching_index));
+				first = true;
+			}
+
+			std::cout << "My Filtering" << std::endl;
+			for(int i = 0; i<correspondences_results->size();i++){
+				std::cout << correspondences_results->at(i).index_match <<","<< correspondences_results->at(i).index_query <<std::endl;	
+			}
 			
 			pcl::registration::CorrespondenceEstimation<pcl::SHOT352, pcl::SHOT352> est;
     		pcl::CorrespondencesPtr correspondences(new pcl::Correspondences());
@@ -201,6 +263,11 @@ class SHOTFeatures
 			corr_rej_one_to_one.setInputCorrespondences(correspondences);
 			corr_rej_one_to_one.getCorrespondences(*correspondences_result_rej_one_to_one);
 
+			std::cout<<"Pcl matches"<<std::endl;
+			for(int j = 0; j < correspondences_result_rej_one_to_one->size(); j++){
+				std::cout<<correspondences_result_rej_one_to_one->at(j)<<std::endl; 
+			}
+
 			// Correspondance rejection RANSAC
 
 			Eigen::Matrix4f transform = Eigen::Matrix4f::Identity();
@@ -208,16 +275,21 @@ class SHOTFeatures
 			pcl::CorrespondencesPtr correspondences_filtered(new pcl::Correspondences());
 			rejector_sac.setInputSource(previous_keypoint_cloud);
 			rejector_sac.setInputTarget(keypoint_cloud);
-			rejector_sac.setInlierThreshold(0.01); // distance in m, not the squared distance
+			rejector_sac.setInlierThreshold(1.0e-9); // distance in m, not the squared distance
 			// rejector_sac.setMaximumIterations(1000);
 			// rejector_sac.setRefineModel(false);
-			// rejector_sac.setInputCorrespondences(correspondences_result_rej_one_to_one);
+			// rejector_sac.setInputCorrespondences(correspondences_results);
 			// rejector_sac.getCorrespondences(*correspondences_filtered);
 			// correspondences.swap(correspondences_filtered);
-			rejector_sac.getRemainingCorrespondences(*correspondences_result_rej_one_to_one,*correspondences_filtered);
+			rejector_sac.getRemainingCorrespondences(*correspondences_results,*correspondences_filtered);
+			// rejector_sac.setRefineModel(true);
 			//rejector_sac.setInputCorrespondences(correspondences_filtered);
-			std::cout << correspondences_result_rej_one_to_one->size() << " vs. " << correspondences_filtered->size() << std::endl;
+			std::cout << correspondences_results->size() << " vs. " << correspondences_filtered->size() << std::endl;
 			transform = rejector_sac.getBestTransformation(); // Transformation Estimation method 1
+
+			for(int j = 0; j < correspondences_filtered->size(); j++){
+				std::cout<<correspondences_filtered->at(j)<<std::endl; 
+			}
 
 			// Transformation Estimation method 2
 			//pcl::registration::TransformationEstimationSVD<pcl::PointXYZ, pcl::PointXYZ> transformation_estimation;
