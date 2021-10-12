@@ -76,7 +76,7 @@ class DSCFeatures
 
 		cv::bilateralFilter(img,filtered_img,15,50,80,cv::BORDER_DEFAULT);
 		std::vector<cv::KeyPoint> keypoints;
-		cv::Ptr<cv::ORB> detector = cv::ORB::create(150);
+		cv::Ptr<cv::ORB> detector = cv::ORB::create(300);
 		detector->detect(filtered_img, keypoints);
 		cv::KeyPoint kk = keypoints[0];
 		std::cout << "Resulting key points are of size: " << keypoints.size() <<std::endl; 
@@ -100,10 +100,15 @@ class DSCFeatures
 			double xc =keypoints[i].pt.x;
 			double yc =keypoints[i].pt.y;
 
-			point.x = cloud->at(xc,yc).x;
-			point.y = cloud->at(xc,yc).y;
-			point.z = cloud->at(xc,yc).z;
-			keypoint_cloud->push_back(point);
+			if(isnan(cloud->at(xc,yc).x)){
+				continue;
+			}else{
+				
+				point.x = cloud->at(xc,yc).x;
+				point.y = cloud->at(xc,yc).y;
+				point.z = cloud->at(xc,yc).z;
+				keypoint_cloud->push_back(point);
+			}
 
 		}
 

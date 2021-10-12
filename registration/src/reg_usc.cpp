@@ -16,9 +16,8 @@
 #include "pcl_ros/point_cloud.h"
 #include "pcl_conversions/pcl_conversions.h"
 
+#include <pcl/registration/ia_ransac.h>
 #include <pcl/registration/icp.h>
-#include <pcl/registration/correspondence_rejection_sample_consensus.h>
-#include <pcl/registration/correspondence_rejection_median_distance.h>
 
 //msgs
 #include "geometry_msgs/Point.h"
@@ -101,11 +100,15 @@ class DSCFeatures
 			double xc =keypoints[i].pt.x;
 			double yc =keypoints[i].pt.y;
 
-			point.x = cloud->at(xc,yc).x;
-			point.y = cloud->at(xc,yc).y;
-			point.z = cloud->at(xc,yc).z;
-			keypoint_cloud->push_back(point);
-
+			if(isnan(cloud->at(xc,yc).x)){
+				continue;
+			}else{
+				
+				point.x = cloud->at(xc,yc).x;
+				point.y = cloud->at(xc,yc).y;
+				point.z = cloud->at(xc,yc).z;
+				keypoint_cloud->push_back(point);
+			}
 		}
 
 		std::cout<<"Keypoint cloud size: "<< keypoint_cloud->points.size()<<std::endl;
@@ -146,71 +149,50 @@ class DSCFeatures
 		double time_taken = double(end-start) / double(CLOCKS_PER_SEC);
 		std::cout << "Time taken :" << time_taken <<std::endl;
 
+		pcl::PointCloud<pcl::PointXYZ>::Ptr keypoint_cloud_1to1 (new pcl::PointCloud<pcl::PointXYZ>);
+		pcl::PointCloud<pcl::UniqueShapeContext1960>::Ptr usc_descriptors_1to1 (new pcl::PointCloud<pcl::UniqueShapeContext1960>);
 
+		for(int i = 0; i<usc_descriptors->size(); i++){
+
+				if(isnan(usc_descriptors->at(i).descriptor[0])){
+					continue;
+				}
+				else{
+					keypoint_cloud_1to1->push_back(keypoint_cloud->at(i));
+					usc_descriptors_1to1->push_back(usc_descriptors->at(i));
+				}
+
+			}
+		std::cout <<"filtered keypoints :" <<keypoint_cloud_1to1->size() << std::endl;
+
+		// pcl::visualization::PCLVisualizer viewer("PCL Viewer");
 		// pcl::visualization::PCLVisualizer viewer("PCL Viewer");
 
 		if(previous_usc_descriptors->size()> 0 && previous_keypoint_cloud->size()>0){
 			std::cout << "hola" << std::endl;
 
-            // correspondence rejection pipeline
-
 			double start_r = std::clock();
-			// 1. correspondence estimation using equalent features
-			pcl::CorrespondencesPtr correspondences (new pcl::Correspondences());
-			pcl::Correspondence c;
-
-			for(int i = 0; i<usc_descriptors->size(); i++){
-
-				for(int j = 0; j < previous_usc_descriptors->size(); j++){
-
-                    if(isnan(usc_descriptors->at(i).descriptor[0]) || isnan(previous_usc_descriptors->at(j).descriptor[0])){
-                        continue;
-                    }else{
-                        if(*usc_descriptors->at(i).descriptor == *previous_usc_descriptors->at(j).descriptor){
-
-                            c.index_query = i;
-                            c.index_match = j;
-                            c.distance = pcl::squaredEuclideanDistance(keypoint_cloud->at(i),previous_keypoint_cloud->at(j));
-                            correspondences->push_back(c);
-                        }
-                    }
-				}
-			}
-			std::cout << "After feature matching :" << correspondences->size()<<std::endl;
-
-			// 2. Reject correspondances which have dostance greater than median distance
-			pcl::CorrespondencesPtr correspondences_distance (new pcl::Correspondences());
-			pcl::registration::CorrespondenceRejectorMedianDistance distanceRejector;
-			distanceRejector.setInputCorrespondences(correspondences);
-			distanceRejector.setMedianFactor(0.01);
-			distanceRejector.getCorrespondences(*correspondences_distance);
-			std::cout << "After distant filtering :" << correspondences_distance->size()<<std::endl;
-
-			// 3. Correspondance rejection RANSAC
+			// 1. initial alignment of point clouds
 			Eigen::Matrix4f initTransform = Eigen::Matrix4f::Identity();
-			pcl::registration::CorrespondenceRejectorSampleConsensus<pcl::PointXYZ> rejector_sac;
+			pcl::SampleConsensusInitialAlignment<pcl::PointXYZ,pcl::PointXYZ,pcl::UniqueShapeContext1960> initSAC;
 			pcl::CorrespondencesPtr correspondences_filtered(new pcl::Correspondences());
-			rejector_sac.setInputSource(keypoint_cloud);
-			rejector_sac.setInputTarget(previous_keypoint_cloud);
-			rejector_sac.setInlierThreshold(0.05); // distance in m, not the squared distance
-			rejector_sac.setMaximumIterations(1000000);
-			rejector_sac.setRefineModel(false);
-			rejector_sac.setInputCorrespondences(correspondences_distance);
-			rejector_sac.getCorrespondences(*correspondences_filtered);
+			initSAC.setMinSampleDistance(0.01);
+			initSAC.setMaxCorrespondenceDistance(0.5);
+			initSAC.setMaximumIterations(1500);
 
-            std::cout << "Final correspondences :" << correspondences_filtered->size()<<std::endl;
+			initSAC.setInputCloud(keypoint_cloud_1to1);
+			initSAC.setSourceFeatures(usc_descriptors_1to1);
 
-			// for(int j = 0; j < correspondences_filtered->size(); j++){
-			// 	std::cout<<correspondences_filtered->at(j)<<std::endl; 
-			// };
-            
-            pcl::PointCloud<pcl::PointXYZ>::Ptr initTransCloud (new pcl::PointCloud<pcl::PointXYZ>);
-
-			pcl::registration::TransformationEstimationSVD<pcl::PointXYZ,pcl::PointXYZ> trans_est;
-			trans_est.estimateRigidTransformation (*keypoint_cloud,*previous_keypoint_cloud, *correspondences_filtered, initTransform);
-            pcl::transformPointCloud(*keypoint_cloud, *initTransCloud, initTransform);
-
-
+			initSAC.setInputTarget(previous_keypoint_cloud);
+			initSAC.setTargetFeatures(previous_usc_descriptors);
+			
+			pcl::PointCloud<pcl::PointXYZ>::Ptr initTransCloud (new pcl::PointCloud<pcl::PointXYZ>);
+			initSAC.align(*initTransCloud);
+			initTransform = initSAC.getFinalTransformation();
+			
+			double end_r = std::clock();
+			double time_r = double(end_r-start_r) / double(CLOCKS_PER_SEC);
+			std::cout << "done init :" <<time_r<<" seconds"<<std::endl;
 			// 2. Fine alignment using ICP
 			Eigen::Matrix4f finalTransform = Eigen::Matrix4f::Identity();
 			pcl::IterativeClosestPoint<pcl::PointXYZ,pcl::PointXYZ> icp;
@@ -225,13 +207,14 @@ class DSCFeatures
 			icp.align(*finalCloud);
 			finalTransform = icp.getFinalTransformation() * initTransform;
 
+			double end2_r = std::clock();
+			double time2_r = double(end2_r-end_r) / double(CLOCKS_PER_SEC);
+			std::cout << "done ICP :" <<time2_r<<" seconds"<<std::endl;
+
+			double time2_reg = double(end2_r-start_r) / double(CLOCKS_PER_SEC);
+			std::cout << "done registration :" <<time2_reg<<" seconds"<<std::endl;
 			//global transform --
 			globaltransform = globaltransform * finalTransform;
-
-			double end_r = std::clock();
-			double time2_reg = double(end_r-start_r) / double(CLOCKS_PER_SEC);
-			std::cout << "done registration :" <<time2_reg<<" seconds"<<std::endl;
-			
 			std::cout << "Global Transform:" << std::endl<< globaltransform << std::endl;
 
 			pcl::PointCloud<pcl::PointXYZ>::Ptr transformed_source(new pcl::PointCloud<pcl::PointXYZ>);
@@ -259,23 +242,26 @@ class DSCFeatures
 
 			previous_usc_descriptors->clear();
 			previous_keypoint_cloud->clear();
-			pcl::copyPointCloud(*usc_descriptors,*previous_usc_descriptors);
-			pcl::copyPointCloud(*keypoint_cloud,*previous_keypoint_cloud);
+			pcl::copyPointCloud(*usc_descriptors_1to1,*previous_usc_descriptors);
+			pcl::copyPointCloud(*keypoint_cloud_1to1,*previous_keypoint_cloud);
 			result->operator+=(*transformed_source);
 			result_rgb->operator+=(*transformed_source_RGB);
 			std::cout<<"cloud size :"<<cloud->width<<"x"<<cloud->height<<std::endl;
 			std::cout<<"Concatanated point cloud size :"<<result->width<<"x"<<result->height<<std::endl;
 
 			publisher.publish(result_rgb);
+
+            
 			
 		}
 		else{
 			std::cout << "first_time" << std::endl;
-			pcl::copyPointCloud(*usc_descriptors,*previous_usc_descriptors);
-			pcl::copyPointCloud(*keypoint_cloud,*previous_keypoint_cloud);
+			pcl::copyPointCloud(*usc_descriptors_1to1,*previous_usc_descriptors);
+			pcl::copyPointCloud(*keypoint_cloud_1to1,*previous_keypoint_cloud);
 			pcl::copyPointCloud(*cloud,*result);
 			pcl::copyPointCloud(*cloud_RGB,*result_rgb);
 		}
+
 		// while(!viewer.wasStopped())
 		// {
 		// 	viewer.spinOnce();

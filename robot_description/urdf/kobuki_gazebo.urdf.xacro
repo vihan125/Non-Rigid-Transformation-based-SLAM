@@ -169,7 +169,7 @@
       </sensor>
     </gazebo>
 
-    <!--gazebo>
+    <gazebo>
       <plugin name="kobuki_controller" filename="libgazebo_ros_kobuki.so">
         <publish_tf>1</publish_tf>
         <left_wheel_joint_name>wheel_left_joint</left_wheel_joint_name>
@@ -185,9 +185,9 @@
         <bumper_name>bumpers</bumper_name>
         <imu_name>imu</imu_name>
       </plugin>
-    </gazebo -->
+    </gazebo>
 
-    <gazebo>
+    <!-- <gazebo>
       <plugin name="turtlebot3_waffle_controller" filename="libgazebo_ros_diff_drive.so">
         <commandTopic>cmd_vel</commandTopic>
         <odometryTopic>odom</odometryTopic>
@@ -208,6 +208,6 @@
         <wheelTorque>10</wheelTorque>
         <rosDebugLevel>na</rosDebugLevel>
       </plugin>
-    </gazebo>
+    </gazebo> -->
   </xacro:macro>
 </robot>

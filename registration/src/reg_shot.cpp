@@ -16,9 +16,8 @@
 #include "pcl_ros/point_cloud.h"
 #include "pcl_conversions/pcl_conversions.h"
 
+#include <pcl/registration/ia_ransac.h>
 #include <pcl/registration/icp.h>
-#include <pcl/registration/correspondence_rejection_sample_consensus.h>
-#include <pcl/registration/correspondence_rejection_median_distance.h>
 
 //msgs
 #include "geometry_msgs/Point.h"
@@ -77,7 +76,7 @@ class SHOTFeatures
 
 		cv::bilateralFilter(img,filtered_img,15,50,80,cv::BORDER_DEFAULT);
 		std::vector<cv::KeyPoint> keypoints;
-		cv::Ptr<cv::ORB> detector = cv::ORB::create(150);
+		cv::Ptr<cv::ORB> detector = cv::ORB::create(300);
 		detector->detect(filtered_img, keypoints);
 		cv::KeyPoint kk = keypoints[0];
 		std::cout << "Resulting key points are of size: " << keypoints.size() <<std::endl; 
@@ -98,13 +97,19 @@ class SHOTFeatures
 		
 		pcl::PointXYZ point;
 		for(int i =0; i< keypoints.size();i++){
+			
 			double xc =keypoints[i].pt.x;
 			double yc =keypoints[i].pt.y;
 
-			point.x = cloud->at(xc,yc).x;
-			point.y = cloud->at(xc,yc).y;
-			point.z = cloud->at(xc,yc).z;
-			keypoint_cloud->push_back(point);
+			if(isnan(cloud->at(xc,yc).x)){
+				continue;
+			}else{
+				
+				point.x = cloud->at(xc,yc).x;
+				point.y = cloud->at(xc,yc).y;
+				point.z = cloud->at(xc,yc).z;
+				keypoint_cloud->push_back(point);
+			}
 
 		}
 
@@ -172,6 +177,22 @@ class SHOTFeatures
 		double time_taken = double(end-start) / double(CLOCKS_PER_SEC);
 		std::cout << "Time taken :" << time_taken <<std::endl;
 
+		pcl::PointCloud<pcl::PointXYZ>::Ptr keypoint_cloud_1to1 (new pcl::PointCloud<pcl::PointXYZ>);
+		pcl::PointCloud<pcl::SHOT352>::Ptr shot_features_1to1 (new pcl::PointCloud<pcl::SHOT352>);
+
+		for(int i = 0; i<shot_features->size(); i++){
+
+				if(isnan(shot_features->at(i).descriptor[0])){
+					continue;
+				}
+				else{
+					keypoint_cloud_1to1->push_back(keypoint_cloud->at(i));
+					shot_features_1to1->push_back(shot_features->at(i));
+				}
+
+			}
+		std::cout <<"filtered keypoints :" <<keypoint_cloud_1to1->size() << std::endl;
+		
 		// pcl::visualization::PCLVisualizer viewer("PCL Viewer");
 
 
@@ -180,63 +201,28 @@ class SHOTFeatures
 		if(previous_shot_features->size()> 0 && previous_keypoint_cloud->size()>0){
 			std::cout << "hola" << std::endl;
 
-            // correspondence rejection pipeline
 			double start_r = std::clock();
-
-			// 1. correspondence estimation using equalent features
-			pcl::CorrespondencesPtr correspondences (new pcl::Correspondences());
-			pcl::Correspondence c;
-
-			for(int i = 0; i<shot_features->size(); i++){
-
-				for(int j = 0; j < previous_shot_features->size(); j++){
-                    if(isnan(shot_features->at(i).descriptor[0]) || isnan(previous_shot_features->at(j).descriptor[0])){
-                        continue;
-                    }else{
-                        if(*shot_features->at(i).descriptor == *previous_shot_features->at(j).descriptor){
-
-                            c.index_query = i;
-                            c.index_match = j;
-                            c.distance = pcl::squaredEuclideanDistance(keypoint_cloud->at(i),previous_keypoint_cloud->at(j));
-                            correspondences->push_back(c);
-                        }
-                    }
-				}
-			}
-			std::cout << "After feature matching :" << correspondences->size()<<std::endl;
-
-			// 2. Reject correspondances which have dostance greater than median distance
-			pcl::CorrespondencesPtr correspondences_distance (new pcl::Correspondences());
-			pcl::registration::CorrespondenceRejectorMedianDistance distanceRejector;
-			distanceRejector.setInputCorrespondences(correspondences);
-			distanceRejector.setMedianFactor(0.1);
-			distanceRejector.getCorrespondences(*correspondences_distance);
-			std::cout << "After distant filtering :" << correspondences_distance->size()<<std::endl;
-
-			// 3. Correspondance rejection RANSAC
+			// 1. initial alignment of point clouds
 			Eigen::Matrix4f initTransform = Eigen::Matrix4f::Identity();
-			pcl::registration::CorrespondenceRejectorSampleConsensus<pcl::PointXYZ> rejector_sac;
+			pcl::SampleConsensusInitialAlignment<pcl::PointXYZ,pcl::PointXYZ,pcl::SHOT352> initSAC;
 			pcl::CorrespondencesPtr correspondences_filtered(new pcl::Correspondences());
-			rejector_sac.setInputSource(keypoint_cloud);
-			rejector_sac.setInputTarget(previous_keypoint_cloud);
-			rejector_sac.setInlierThreshold(0.05); // distance in m, not the squared distance
-			rejector_sac.setMaximumIterations(1000000);
-			rejector_sac.setRefineModel(false);
-			rejector_sac.setInputCorrespondences(correspondences_distance);
-			rejector_sac.getCorrespondences(*correspondences_filtered);
+			initSAC.setMinSampleDistance(0.01);
+			initSAC.setMaxCorrespondenceDistance(0.5);
+			initSAC.setMaximumIterations(1500);
 
-            std::cout << "Final correspondences :" << correspondences_filtered->size()<<std::endl;
+			initSAC.setInputCloud(keypoint_cloud_1to1);
+			initSAC.setSourceFeatures(shot_features_1to1);
 
-			// for(int j = 0; j < correspondences_filtered->size(); j++){
-			// 	std::cout<<correspondences_filtered->at(j)<<std::endl; 
-			// };
-            
-            pcl::PointCloud<pcl::PointXYZ>::Ptr initTransCloud (new pcl::PointCloud<pcl::PointXYZ>);
-
-			pcl::registration::TransformationEstimationSVD<pcl::PointXYZ,pcl::PointXYZ> trans_est;
-			trans_est.estimateRigidTransformation (*keypoint_cloud,*previous_keypoint_cloud, *correspondences_filtered, initTransform);
-            pcl::transformPointCloud(*keypoint_cloud, *initTransCloud, initTransform);
-
+			initSAC.setInputTarget(previous_keypoint_cloud);
+			initSAC.setTargetFeatures(previous_shot_features);
+			
+			pcl::PointCloud<pcl::PointXYZ>::Ptr initTransCloud (new pcl::PointCloud<pcl::PointXYZ>);
+			initSAC.align(*initTransCloud);
+			initTransform = initSAC.getFinalTransformation();
+			
+			double end_r = std::clock();
+			double time_r = double(end_r-start_r) / double(CLOCKS_PER_SEC);
+			std::cout << "done init :" <<time_r<<" seconds"<<std::endl;
 			// 2. Fine alignment using ICP
 			Eigen::Matrix4f finalTransform = Eigen::Matrix4f::Identity();
 			pcl::IterativeClosestPoint<pcl::PointXYZ,pcl::PointXYZ> icp;
@@ -251,10 +237,12 @@ class SHOTFeatures
 			icp.align(*finalCloud);
 			finalTransform = icp.getFinalTransformation() * initTransform;
 
-			double end_r = std::clock();
-			double time2_reg = double(end_r-start_r) / double(CLOCKS_PER_SEC);
-			std::cout << "done registration :" <<time2_reg<<" seconds"<<std::endl;
+			double end2_r = std::clock();
+			double time2_r = double(end2_r-end_r) / double(CLOCKS_PER_SEC);
+			std::cout << "done ICP :" <<time2_r<<" seconds"<<std::endl;
 
+			double time2_reg = double(end2_r-start_r) / double(CLOCKS_PER_SEC);
+			std::cout << "done registration :" <<time2_reg<<" seconds"<<std::endl;
 			//global transform --
 			globaltransform = globaltransform * finalTransform;
 			std::cout << "Global Transform:" << std::endl<< globaltransform << std::endl;
@@ -284,8 +272,8 @@ class SHOTFeatures
 
 			previous_shot_features->clear();
 			previous_keypoint_cloud->clear();
-			pcl::copyPointCloud(*shot_features,*previous_shot_features);
-			pcl::copyPointCloud(*keypoint_cloud,*previous_keypoint_cloud);
+			pcl::copyPointCloud(*shot_features_1to1,*previous_shot_features);
+			pcl::copyPointCloud(*keypoint_cloud_1to1,*previous_keypoint_cloud);
 			result->operator+=(*transformed_source);
 			result_rgb->operator+=(*transformed_source_RGB);
 			std::cout<<"cloud size :"<<cloud->width<<"x"<<cloud->height<<std::endl;
@@ -297,21 +285,18 @@ class SHOTFeatures
 		}
 		else{
 			std::cout << "first_time" << std::endl;
-			pcl::copyPointCloud(*shot_features,*previous_shot_features);
-			pcl::copyPointCloud(*keypoint_cloud,*previous_keypoint_cloud);
+			pcl::copyPointCloud(*shot_features_1to1,*previous_shot_features);
+			pcl::copyPointCloud(*keypoint_cloud_1to1,*previous_keypoint_cloud);
 			pcl::copyPointCloud(*cloud,*result);
 			pcl::copyPointCloud(*cloud_RGB,*result_rgb);
 		}
+
 		// while(!viewer.wasStopped())
 		// {
 		// 	viewer.spinOnce();
 		// }
 
-		// while (!ICPView.wasStopped())
-		// {
 
-		// 	ICPView.spinOnce();
-		// }
 
 		 std::cout<<"***********************************************************"<<std::endl;
 		

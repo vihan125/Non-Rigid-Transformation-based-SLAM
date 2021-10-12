@@ -100,10 +100,15 @@ class FPFHFeatures
 			double xc =keypoints[i].pt.x;
 			double yc =keypoints[i].pt.y;
 
-			point.x = cloud->at(xc,yc).x;
-			point.y = cloud->at(xc,yc).y;
-			point.z = cloud->at(xc,yc).z;
-			keypoint_cloud->push_back(point);
+			if(isnan(cloud->at(xc,yc).x)){
+				continue;
+			}else{
+				
+				point.x = cloud->at(xc,yc).x;
+				point.y = cloud->at(xc,yc).y;
+				point.z = cloud->at(xc,yc).z;
+				keypoint_cloud->push_back(point);
+			}
 
 		}
 
