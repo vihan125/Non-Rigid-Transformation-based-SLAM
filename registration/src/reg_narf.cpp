@@ -85,7 +85,7 @@ class NARFFeatures
 
 		cv::bilateralFilter(img,filtered_img,15,50,80,cv::BORDER_DEFAULT);
 		std::vector<cv::KeyPoint> keypoints;
-		cv::Ptr<cv::ORB> detector = cv::ORB::create(300);
+		cv::Ptr<cv::ORB> detector = cv::ORB::create(250);
 		detector->detect(filtered_img, keypoints);
 		cv::KeyPoint kk = keypoints[0];
 		std::cout << "Resulting key points are of size: " << keypoints.size() <<std::endl; 
@@ -186,10 +186,6 @@ class NARFFeatures
         narf_descriptor.compute (*narf_descriptors);
         std::cout << "Extracted "<<narf_descriptors->size ()<<" descriptors for "<<keypoint_indices2.size ()<< " keypoints.\n";
 
-		double end = std::clock();
-		double time_taken = double(end-start) / double(CLOCKS_PER_SEC);
-		std::cout << "Time taken :" << time_taken <<std::endl;
-
 		pcl::PointXYZ pointNarf;
 		pcl::PointXYZ pointKey;
 
@@ -206,6 +202,9 @@ class NARFFeatures
 
 		// Visualization of keypoints along with the original cloud
 		// pcl::visualization::PCLVisualizer viewer("PCL Viewer");
+		double end = std::clock();
+		double time_taken = double(end-start) / double(CLOCKS_PER_SEC);
+		std::cout << "Time taken :" << time_taken <<std::endl;
 
 		std::cout <<"filtered keypoints :" <<keypoint_cloud_1to1->size() << std::endl;
 		std::cout <<"filtered features :" <<narf_descriptors->size() << std::endl;

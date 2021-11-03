@@ -56,18 +56,16 @@ endif()
 ##   * add every package in MSG_DEP_SET to generate_messages(DEPENDENCIES ...)
 
 ## Generate messages in the 'msg' folder
-# add_message_files(
-#   FILES
-#   Message1.msg
-#   Message2.msg
-# )
+add_message_files(
+  FILES
+  transform.msg
+)
 
 ## Generate services in the 'srv' folder
-# add_service_files(
-#   FILES
-#   Service1.srv
-#   Service2.srv
-# )
+add_service_files(
+  FILES
+  getTransform.srv
+)
 
 ## Generate actions in the 'action' folder
 # add_action_files(
@@ -77,10 +75,10 @@ endif()
 # )
 
 ## Generate added messages and services with any dependencies listed here
-# generate_messages(
-#   DEPENDENCIES
-#   std_msgs  # Or other packages containing msgs
-# )
+generate_messages(
+  DEPENDENCIES
+  std_msgs  # Or other packages containing msgs
+)
 
 ################################################
 ## Declare ROS dynamic reconfigure parameters ##
@@ -147,9 +145,10 @@ include_directories(
 add_executable(REG_FPFH src/reg_fpfh.cpp)
 add_executable(REG_NARF src/reg_narf.cpp)
 add_executable(REG_SHOT src/reg_shot.cpp)
-add_executable(REG_3DSC src/reg_3dc.cpp)
+add_executable(REG_3DSC src/3dcNode.cpp src/reg_3dc.cpp src/transformation.cpp)
 add_executable(REG_USC src/reg_usc.cpp)
-
+add_executable(Transform src/transformNode.cpp src/transformation.cpp)
+add_executable(REG_Odom src/odomNode.cpp src/odom.cpp)
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
 ## target back to the shorter version for ease of user use
@@ -198,6 +197,14 @@ target_link_libraries(REG_USC
   ${OpenCV_LIBRARIES}
   pcl_visualization
   pcl_registration
+)
+
+target_link_libraries(Transform
+  ${catkin_LIBRARIES}
+)
+
+target_link_libraries(REG_Odom
+  ${catkin_LIBRARIES}
 )
 
 #############
