@@ -1,6 +1,16 @@
 #include <iostream>
 #include "ros/ros.h"
 #include <cv_bridge/cv_bridge.h>
+#include <tf/transform_listener.h>
+
+#include <tf2/transform_datatypes.h>
+#include <tf2/LinearMath/Matrix3x3.h>
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2_sensor_msgs/tf2_sensor_msgs.h>
+#include <tf2_ros/buffer.h>
+
+#include <geometry_msgs/Quaternion.h>
+#include <geometry_msgs/TransformStamped.h>
 
 //PCL
 #include <pcl/conversions.h>
@@ -36,10 +46,7 @@
 #include <opencv2/features2d.hpp>
 #include <opencv2/highgui/highgui.hpp>
 
-// Services
-#include "registration/getTransform.h"
-
-class RegisterOdom{
+class RegisterTF{
 
     typedef struct
     {
@@ -53,10 +60,13 @@ class RegisterOdom{
 		pcl::PointCloud<pcl::PointXYZRGB>::Ptr result_rgb;
         pcl::PointCloud<pcl::PointXYZ>::Ptr graph;
 		Eigen::Matrix4f globaltransform; 
-        registration::getTransform srv;
 
-        RegisterOdom();
+        RegisterTF();
         void processPointCloud(const sensor_msgs::PointCloud2ConstPtr& cloud_msg);
+        // tf2_ros::Buffer* buffer = nullptr;
+        // tf2_ros::TransformListener* listener = nullptr;
+        
+        // tf::TransformListener listener;
 
     private: 
         std::map<float, std::vector<Coordinate>> DeformG = {}; // Deformation graph
@@ -64,6 +74,7 @@ class RegisterOdom{
         ros::Subscriber subscriber;
         ros::Publisher publisher;
         ros::Publisher publisher2;
-        ros::ServiceClient client;
+        bool tf_recived;
+        
         
 };
