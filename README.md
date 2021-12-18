@@ -17,6 +17,6 @@ Simulations were done using Gazebo and When doing the simulations for the projec
 </p>
 
 Simulations of the project can be found in the following links,
-Simulation of mapping the environments - https://github.com/vihan125/Non-Rigid-Transformation-based-SLAM/blob/main/Simulations/Mapping%20Environment.mp4
-Construction of deformation graph while mapping - https://github.com/vihan125/Non-Rigid-Transformation-based-SLAM/blob/main/Simulations/Deformation%20graph%20construction.mp4
+* Simulation of mapping the environments - https://github.com/vihan125/Non-Rigid-Transformation-based-SLAM/blob/main/Simulations/Mapping%20Environment.mp4
+* Construction of deformation graph while mapping - https://github.com/vihan125/Non-Rigid-Transformation-based-SLAM/blob/main/Simulations/Deformation%20graph%20construction.mp4
 
