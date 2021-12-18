@@ -8,12 +8,12 @@ This project is an attempt to implement a new Visual Simultaneous Localization a
 Simulations were done using Gazebo and When doing the simulations for the project two types of indoor environmnets were used to accommadate environments of different natures that a robot may encounter. Environmnets used in the simulations are,
 * House hold environment
 <p align="center">
-  <image src = https://github.com/vihan125/Biometric-Authentication-Device/blob/master/images/read%20me%20images/REGISTERS.PNG width="100%" height="100%">
+  <image src = https://github.com/vihan125/Non-Rigid-Transformation-based-SLAM/blob/main/Images/house_environment.PNG  width="100%" height="100%">
 </p>
   
 * Warehouse environment 
 <p align="center">
-  <image src = https://github.com/vihan125/Biometric-Authentication-Device/blob/master/images/read%20me%20images/REGISTERS.PNG width="100%" height="100%">
+  <image src = https://github.com/vihan125/Non-Rigid-Transformation-based-SLAM/blob/main/Images/warehouse_environment.PNG width="100%" height="100%">
 </p>
 
 Simulations of the project can be found in the following links,
