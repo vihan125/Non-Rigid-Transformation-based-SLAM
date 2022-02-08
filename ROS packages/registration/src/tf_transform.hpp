@@ -8,6 +8,9 @@
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_sensor_msgs/tf2_sensor_msgs.h>
 #include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_broadcaster.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+
 
 #include <geometry_msgs/Quaternion.h>
 #include <geometry_msgs/TransformStamped.h>
@@ -16,6 +19,7 @@
 #include <pcl/conversions.h>
 #include <pcl/point_types.h>
 #include <pcl/io/pcd_io.h>
+#include <pcl/gpu/containers/device_array.h>
 
 
 #include <pcl/io/pcd_io.h>
@@ -46,15 +50,41 @@
 #include <opencv2/features2d.hpp>
 #include <opencv2/highgui/highgui.hpp>
 
+// Maths modules
+#include <cmath>
+
+// CUDA header
+#include "deformation.h"
+
 class RegisterTF{
 
-    typedef struct
+    struct Coordinate 
     {
         double x;
         double y;
         double z;
-    } Coordinate;
 
+        float getDistance(const Coordinate& rhs)
+        {
+            double x_dif = abs(x - rhs.x);
+            double y_dif = abs(y - rhs.y);
+            double z_dif = abs(z - rhs.z);
+
+            // Calculate squared distance (Sqaure root is expensive)
+            float distance = (x_dif*x_dif)+(y_dif*y_dif)+(z_dif*z_dif);
+
+            return distance;
+
+            // if ((0.02 > x_dif >= 0.005) && (0.02 > y_dif >= 0.005) && (0.02 > z_dif >= 0.005)){
+            //     return true;
+            // } 
+            // else{
+            //     return false;
+            // }
+        }
+    };
+
+    typedef Coordinate Coordinate;
 
     public:
 		pcl::PointCloud<pcl::PointXYZRGB>::Ptr result_rgb;
@@ -69,7 +99,7 @@ class RegisterTF{
         // tf::TransformListener listener;
 
     private: 
-        std::map<float, std::vector<Coordinate>> DeformG = {}; // Deformation graph
+        std::unordered_map<float, std::vector<Coordinate>> DeformG = {}; // Deformation graph
         ros::NodeHandle nh;
         ros::Subscriber subscriber;
         ros::Publisher publisher;

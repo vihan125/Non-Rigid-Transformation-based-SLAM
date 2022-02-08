@@ -113,8 +113,7 @@ void Transformation::calculateTransform(const nav_msgs::Odometry::ConstPtr& odom
 // 	return result;
 // }
 
-bool Transformation::sendTransform(registration::getTransform::Request &req, 
-registration::getTransform::Response &res){
+bool Transformation::sendTransform(registration::getTransform::Request &req,registration::getTransform::Response &res){
 
 	int date = req.date;
 	std::cout<<"time :"<<date<<std::endl;

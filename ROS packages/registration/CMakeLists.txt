@@ -20,13 +20,41 @@ find_package(catkin REQUIRED COMPONENTS
 )
 
 ## System dependencies are found with CMake's conventions
-find_package(PCL)
+
+find_package(PCL 1.12.1 EXACT REQUIRED PATHS /usr/local/share/pcl-1.12)
+
 find_package(OpenCV COMPONENTS opencv_highgui opencv_features2d opencv_xfeatures2d opencv_calib3d)
 if(NOT OPENCV_FOUND)
 	find_package(OpenCV REQUIRED COMPONENTS opencv_highgui opencv_features2d opencv_calib3d)
 	add_definitions(-DNO_CV_XFEATURES2D)
 endif()
 
+find_package(CUDA REQUIRED)
+
+message("-- CUDA version: ${CUDA_VERSION}")
+
+SET(CUDA_NVCC_FLAGS "-arch=sm_75" CACHE STRING "nvcc flags" FORCE)
+SET(CUDA_VERBOSE_BUILD ON CACHE BOOL "nvcc verbose" FORCE)
+SET(LIB_TYPE STATIC)
+
+get_directory_property(dir_defs DIRECTORY ${CMAKE_SOURCE_DIR} COMPILE_DEFINITIONS)
+set(vtk_flags)
+
+foreach(it ${dir_defs})
+     if(it MATCHES "vtk*")
+     list(APPEND vtk_flags ${it})
+    endif()
+endforeach()
+foreach(d ${vtk_flags})
+     remove_definitions(- D${d})
+endforeach()
+
+CUDA_ADD_LIBRARY(NineLib ${LIB_TYPE} src/deformation.cu)
+
+# SET(CUDA_NVCC_FLAGS "-arch=sm_13" CACHE STRING "nvcc flags" FORCE)
+# SET (CUDA_VERBOSE_BUILD ON CACHE BOOL "nvcc verbose" FORCE)
+# SET(LIB_TYPE STATIC) 
+# CUDA_ADD_LIBRARY(TestLib ${LIB_TYPE} src/deformation.cu)
 
 ## Uncomment this if the package has a setup.py. This macro ensures
 ## modules and global scripts declared therein get installed
@@ -128,7 +156,11 @@ include_directories(
 # include
     ${catkin_INCLUDE_DIRS}
     ${OpenCV_INCLUDE_DIRS}
+    ${PCL_INCLUDE_DIRS}
 )
+
+link_directories(${PCL_LIBRARY_DIRS})
+add_definitions(${PCL_DEFINITIONS})
 
 ## Declare a C++ library
 # add_library(${PROJECT_NAME}
@@ -144,6 +176,7 @@ include_directories(
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
 # add_executable(${PROJECT_NAME}_node src/registration_node.cpp)
+
 add_executable(REG_FPFH src/reg_fpfh.cpp)
 add_executable(REG_NARF src/reg_narf.cpp)
 add_executable(REG_SHOT src/reg_shot.cpp)
@@ -152,6 +185,7 @@ add_executable(REG_USC src/reg_usc.cpp)
 add_executable(Transform src/transformNode.cpp src/transformation.cpp)
 add_executable(REG_Odom src/odomNode.cpp src/odom.cpp)
 add_executable(REG_TF src/tf_transform.cpp)
+
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
 ## target back to the shorter version for ease of user use
@@ -162,6 +196,7 @@ add_executable(REG_TF src/tf_transform.cpp)
 ## same as for the library above
 # add_dependencies(${PROJECT_NAME}_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
+add_dependencies(REG_TF NineLib)
 ## Specify libraries to link a library or executable target against
 # target_link_libraries(${PROJECT_NAME}_node
 #   ${catkin_LIBRARIES}
@@ -170,36 +205,31 @@ add_executable(REG_TF src/tf_transform.cpp)
 target_link_libraries(REG_FPFH
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES}
-  pcl_visualization
-  pcl_registration
+  ${PCL_LIBRARIES}
 )
 
 target_link_libraries(REG_NARF
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES}
-  pcl_visualization
-  pcl_registration
+  ${PCL_LIBRARIES}
 )
 
 target_link_libraries(REG_SHOT
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES}
-  pcl_visualization
-  pcl_registration
+  ${PCL_LIBRARIES}
 )
 
 target_link_libraries(REG_3DSC
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES}
-  pcl_visualization
-  pcl_registration
+  ${PCL_LIBRARIES}
 )
 
 target_link_libraries(REG_USC
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES}
-  pcl_visualization
-  pcl_registration
+  ${PCL_LIBRARIES}
 )
 
 target_link_libraries(Transform
@@ -208,10 +238,13 @@ target_link_libraries(Transform
 
 target_link_libraries(REG_Odom
   ${catkin_LIBRARIES}
+  ${PCL_LIBRARIES}
 )
 
 target_link_libraries(REG_TF
   ${catkin_LIBRARIES}
+  ${PCL_LIBRARIES}
+  NineLib
 )
 
 #############

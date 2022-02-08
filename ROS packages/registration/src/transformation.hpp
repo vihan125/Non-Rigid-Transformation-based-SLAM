@@ -10,8 +10,7 @@ class Transformation{
     public:
         Transformation();
         void calculateTransform(const nav_msgs::Odometry::ConstPtr& odom);
-        bool sendTransform(registration::getTransform::Request &req, 
-        registration::getTransform::Response &res);
+        bool sendTransform(registration::getTransform::Request &req,registration::getTransform::Response &res);
 	
     private: 
         static std::map<int, Eigen::Matrix4f> time_data;

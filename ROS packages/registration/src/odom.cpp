@@ -114,6 +114,7 @@ void RegisterOdom::processPointCloud(const sensor_msgs::PointCloud2ConstPtr& clo
     cloud_RGB->is_dense = false;
 
     srv.request.date = time;
+   
     
     if(result_rgb->size()>0){
 
